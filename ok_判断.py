@@ -69,20 +69,23 @@ def judge_md(pr_num):
 # 判断pr是否是重构优化，是则返回1，反之为0
 @retrying.retry(wait_fixed=2000)
 def judge_refactor(pr_num):
+    keywords = ['Refactor', 'refactor']
     # 获取pr页面
     pr_page_html = get_html(project_pull_url + str(pr_num))
     pr_page_soup = BeautifulSoup(pr_page_html.text, "html5lib")
     # pr标题内容
     pr_title = pr_page_soup.find("h1", attrs={"class": "gh-header-title"}).text.strip()
     # 如果标题含有“重构”等词汇则返回1
-    if "Refactor" in pr_title or "refactor" in pr_title:
-        return 1
+    for keyword in keywords:
+        if "Refactor" in pr_title or "refactor" in pr_title:
+            return 1
 
     # pr内容获取
     pr_content = pr_page_soup.find("div", attrs={"class": "js-discussion js-socket-channel ml-6 pl-3"})
     # 如果内容含有“重构”等词汇则返回1
-    if "Refactor" in pr_content.text or "refactor" in pr_content.text:
-        return 1
+    for keyword in  keywords:
+        if keyword in pr_content.text:
+            return 1
     # 没有找到关键字，返回0
     return 0
 
@@ -90,6 +93,7 @@ def judge_refactor(pr_num):
 # 判断pr是否是修补bug，若修补自己的bug则返回1，别人的返回2，无法判断返回3，不是修bug返回0
 @retrying.retry(wait_fixed=2000)
 def judge_fix_bug(pr_num):
+    keywords = ['bug', 'Bug', 'fix', 'Fix']
     # bug判断标志
     flag = 0
     # 获取pr页面
@@ -99,12 +103,17 @@ def judge_fix_bug(pr_num):
 
     # 判断标题含有判断修复Bug的关键词
     pr_title = pr_page_soup.find("h1", attrs={"class": "gh-header-title"}).text.strip()
-    if "bug" in pr_title or "Bug" in pr_title or "fix" in pr_title or "Fix" in pr_title:
-        flag = 3
+    for keyword in keywords:
+        if keyword in pr_title:
+            flag = 3
+            break
+
     pr_content = pr_page_soup.find("div", attrs={"class": "js-discussion js-socket-channel ml-6 pl-3"})
     # 判断内容含有判断修复Bug的关键词
-    if "bug" in pr_content.text or "Bug" in pr_content.text or "fix" in pr_content.text or "Fix" in pr_content.text:
-        flag = 3
+    for keyword in keywords:
+        if keyword in pr_content.text:
+            flag = 3
+            break
 
     # 判断是否存在issue
     issue_tags = pr_content.find_all("a", attrs={"class": "issue-link js-issue-link"})
@@ -124,12 +133,17 @@ def judge_fix_bug(pr_num):
 
             # 判断issue里面是否有判断PR是修补Bug的关键词
             issue_title = issue_page_soup.find("span", attrs={"class": "js-issue-title"}).text.strip()
-            if "bug" in issue_title or "Bug" in issue_title or "fix" in issue_title:
-                flag = 3
-            issue_content = issue_page_soup.find("div", attrs={"class": "js-discussion js-socket-channel ml-0 pl-0 ml-md-6 pl-md-3"})
+            for keyword in keywords:
+                if keyword in issue_title:
+                    flag = 3
+                    break
+
             # 判断内容含有判断修复Bug的关键词
-            if "bug" in issue_content.text or "Bug" in issue_content.text or "fix" in issue_content.text:
-                flag = 3
+            issue_content = issue_page_soup.find("div", attrs={"class": "js-discussion js-socket-channel ml-0 pl-0 ml-md-6 pl-md-3"})
+            for keyword in keywords:
+                if keyword in issue_content.text:
+                    flag = 3
+                    break
 
             # 判断pr中出现的issue作者是否和pr作者相同 若相同则bug是自己发现的，不同则为其他人
             issue_author = issue_page_soup.find("a", attrs={"class": "author link-gray-dark css-truncate-target width-fit"}).text
@@ -150,10 +164,13 @@ def judge_fix_bug(pr_num):
             commit_url = commit_tag.attrs['href']
             commit_page_html = get_html(commit_url)
             commit_page_soup = BeautifulSoup(commit_page_html.text, "html5lib")
+
             # 判断commit描述中是否存在关键词
             commit_description = commit_page_soup.find("div", attrs={"class": "commit-desc"}).text.strip()
-            if "bug" in commit_description or "Bug" in commit_description or "fix" in commit_description:
-                flag = 3
+            for keyword in keywords:
+                if keyword in commit_description:
+                    flag = 3
+                    break
 
             # 判断commit的作者和PR作者是否相同，但是commit的作者可能存在多个，需要逐个比对
             commit_authors = commit_page_soup.find_all("a", attrs={"class": "commit-author tooltipped tooltipped-s user-mention"})
