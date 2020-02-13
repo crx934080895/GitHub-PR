@@ -41,7 +41,7 @@ def get_time(pr_num):
 # 判断修改md文件,若修改了则返回1，反之返回0
 @retrying.retry(wait_fixed=2000)
 def judge_md(pr_num):
-    # 更改md文件的标签
+    # 更改md文件的标记
     flag = 0
     # 获取commit详情页地址
     commit_page_html = get_html(project_pull_url+str(pr_num)+"/commits")
@@ -96,6 +96,8 @@ def judge_fix_bug(pr_num):
     keywords = ['bug', 'Bug', 'fix', 'Fix']
     # bug判断标志
     flag = 0
+    issue_flag = 0
+    commit_flag = 0
     # 获取pr页面
     pr_page_html = get_html(project_pull_url + str(pr_num))
     pr_page_soup = BeautifulSoup(pr_page_html.text, "html5lib")
@@ -125,6 +127,7 @@ def judge_fix_bug(pr_num):
             continue
 
     if issue_tags.__len__() != 0:
+        issue_flag = 1
         # 如果存在issue链接，那么去分析对应的issue信息
         for issue_tag in issue_tags:
             issue_url = issue_tag.attrs['href']
@@ -159,6 +162,7 @@ def judge_fix_bug(pr_num):
     # 判断是否存在commit
     commit_tags = pr_page_soup.find_all("a", attrs={"class": "commit-link"})
     if commit_tags.__len__() != 0:
+        commit_flag = 1
         # 如果存在commit链接，那么去分析对应的commit信息
         for commit_tag in commit_tags:
             commit_url = commit_tag.attrs['href']
@@ -182,4 +186,5 @@ def judge_fix_bug(pr_num):
                         flag = 2
                 else:
                     continue
-    return flag
+    return flag,issue_flag,commit_flag
+

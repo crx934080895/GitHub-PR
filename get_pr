@@ -1,0 +1,74 @@
+# -- coding: utf-8 --
+
+import requests
+from bs4 import BeautifulSoup
+import retrying
+
+
+def get_html(url):
+    headers = {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36"
+    }
+    try:
+        r = requests.get(url, timeout=15, headers=headers)
+        r.raise_for_status()
+        r.encoding = 'utf-8'
+        return r
+    except:
+        print(url + '网页获取失败')
+
+
+class PrGet:
+    project_url = "https://github.com/tensorflow/tensorflow"
+    project_pr_url = project_url+"/pulls?q=is%3Apr+is%3Aclosed"
+    # 通过的PR编号列表
+    ok_num = {}
+    # 未通过的PR编号列表
+    fail_num = {}
+    # 未识别的PR编号列表
+    unknown_num = {}
+    # 存储路径
+    path = "."
+
+    @retrying.retry(wait_fixed=2000)
+    def get_pr_list(self, start_page, end_page):
+
+        for page in range(start_page, end_page+1):
+            r = get_html(self.project_pr_url+'&page='+str(page))
+            pr_page_soup = BeautifulSoup(r.text, "html5lib")
+            pr_div = pr_page_soup.find("div", attrs={"class": "js-navigation-container js-active-navigation-container"})
+            # PR列表
+            pr_list = pr_div.contents
+
+            # 清理PR_list列表多余项
+            for i in pr_list:
+                if type(i) != "Tag":
+                    pr_list.remove(i)
+
+            # 遍历PR列表（第一次分类，根据是否通过分类）
+            for PR in pr_list:
+                url_num = PR.attrs["id"].split("_")[-1]
+                # 判断通过标注是否存在
+                if PR.find("svg", attrs={"class": "octicon octicon-git-merge merged"}) != None:
+                    self.ok_num[url_num] = str(0)
+                    continue
+                # 判断关闭标志是否存在
+                if PR.find("svg", attrs={"class": "octicon octicon-git-pull-request closed"}) != None:
+                    self.fail_num[url_num] = str(0)
+                    continue
+                self.unknown_num[url_num] = str(0)
+
+    def store_result(self):
+        ok_file = open(self.path+"ok_list.txt", "a", encoding="utf-8")
+        fail_file = open(self.path+"fail_list.txt", "a", encoding="utf-8")
+        # 写入成功的
+        for key in self.ok_num.keys():
+            ok_file.write(key+"\n")
+        # 写入失败的
+        for key in self.fail_num.keys():
+            fail_file.write(key+"\n")
+
+
+pr_get = PrGet()
+pr_get.get_pr_list(1, 10)
+pr_get.store_result()
