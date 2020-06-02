@@ -1,10 +1,13 @@
 # -- coding: utf-8 --
+import datetime
 
 import requests
 from bs4 import BeautifulSoup
 import retrying
+import time
 
 
+@retrying.retry(wait_fixed=2000)
 def get_html(url):
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36"
@@ -20,22 +23,36 @@ def get_html(url):
 
 class PrGet:
     project_url = "https://github.com/tensorflow/tensorflow"
-    project_pr_url = project_url+"/pulls?q=is%3Apr+is%3Aclosed"
+    # 已经关闭的PR
+    project_pr_url = project_url + "/pulls?q=is%3Apr+is%3Aclosed"
     # 通过的PR编号列表
     ok_num = {}
     # 未通过的PR编号列表
     fail_num = {}
-    # 未识别的PR编号列表
-    unknown_num = {}
     # 存储路径
-    path = "."
+    path = "./pr_data"
 
-    @retrying.retry(wait_fixed=2000)
-    def get_pr_list(self, start_page, end_page):
+    def get_and_store_pr_list(self, start_page, end_page):
+        for page in range(start_page, end_page + 1):
+            self.ok_num.clear()
+            self.fail_num.clear()
+            print("正在开始获取第" + str(page) + "页")
+            flag = False
+            for _ in range(3):
+                try:
+                    r = get_html(self.project_pr_url + '&page=' + str(page))
+                    pr_page_soup = BeautifulSoup(r.text, "html5lib")
+                    flag = True
+                    break
+                except:
+                    print("获取第" + str(page) + "页" + "获取失败 五秒后重新获取")
+                    time.sleep(5)
+                    continue
+            if not flag:
+                f = open(self.path + "fail_get.txt", "w", encoding="utf-8")
+                f.write("获取第" + str(page) + "页" + "获取失败")
+                continue
 
-        for page in range(start_page, end_page+1):
-            r = get_html(self.project_pr_url+'&page='+str(page))
-            pr_page_soup = BeautifulSoup(r.text, "html5lib")
             pr_div = pr_page_soup.find("div", attrs={"class": "js-navigation-container js-active-navigation-container"})
             # PR列表
             pr_list = pr_div.contents
@@ -45,30 +62,188 @@ class PrGet:
                 if type(i) != "Tag":
                     pr_list.remove(i)
 
-            # 遍历PR列表（第一次分类，根据是否通过分类）
+            # 遍历PR列表
             for PR in pr_list:
                 url_num = PR.attrs["id"].split("_")[-1]
                 # 判断通过标注是否存在
-                if PR.find("svg", attrs={"class": "octicon octicon-git-merge merged"}) != None:
+                if PR.find("svg", attrs={"class": "octicon octicon-git-merge merged"}) is not None:
                     self.ok_num[url_num] = str(0)
                     continue
                 # 判断关闭标志是否存在
-                if PR.find("svg", attrs={"class": "octicon octicon-git-pull-request closed"}) != None:
+                if PR.find("svg", attrs={"class": "octicon octicon-git-pull-request closed"}) is not None:
                     self.fail_num[url_num] = str(0)
                     continue
-                self.unknown_num[url_num] = str(0)
+            print("第" + str(page) + "页" + "获取完成")
 
-    def store_result(self):
-        ok_file = open(self.path+"ok_list.txt", "a", encoding="utf-8")
-        fail_file = open(self.path+"fail_list.txt", "a", encoding="utf-8")
-        # 写入成功的
-        for key in self.ok_num.keys():
-            ok_file.write(key+"\n")
-        # 写入失败的
-        for key in self.fail_num.keys():
-            fail_file.write(key+"\n")
+            ok_file = open(self.path + "/ok_list.txt", "a", encoding="utf-8")
+            fail_file = open(self.path + "/fail_list.txt", "a", encoding="utf-8")
+
+            print("第" + str(page) + "页" + "开始写入")
+            # 写入成功的
+            for key in self.ok_num.keys():
+                ok_file.write(key + "\n")
+            # 写入失败的
+            for key in self.fail_num.keys():
+                fail_file.write(key + "\n")
+            print("第" + str(page) + "页" + "写入完成")
+
+    def get_fail_pr_comment(self):
+        fail_file = open(self.path + "/fail_list.txt", "r", encoding="utf-8")
+        lines = fail_file.readlines()
+        for line in lines:
+            pr_number = line.strip()
+            flag = False
+            for _ in range(3):
+                try:
+                    pr_page = get_html(self.project_url + "/pull/" + pr_number)
+                    pr_page_soup = BeautifulSoup(pr_page.text, "html5lib")
+                    flag = True
+                    break
+                except:
+                    continue
+            if not flag:
+                f = open(self.path + "/fail_pr_comment/" + "comment_fail.txt", "a", encoding="utf-8")
+                f.write(line + "fail\n")
+                continue
+            comment_file = open(self.path + "/fail_pr_comment/" + pr_number + ".txt", "w", encoding="utf-8")
+            try:
+                try:
+                    # 根据关闭的标签来获取关闭者的评论
+                    close_comment = pr_page_soup.find("div", attrs={
+                        "class": "TimelineItem-badge text-white bg-red"}).parent.parent. \
+                        find_previous_sibling().find("div", attrs={"class": "edit-comment-hide"}).text.strip()
+                except:
+                    close_comment = pr_page_soup.find("div", attrs={
+                        "class": "TimelineItem-badge text-white bg-red"}).parent.parent. \
+                        find_previous_sibling().find_previous_sibling().find_previous_sibling().find("div", attrs={
+                        "class": "edit-comment-hide"}).text.strip()
+                    print(pr_number + "获取成功" + "\t" + time.ctime())
+            except:
+                # 无评论关闭的情况
+                print(pr_number + "内容为空" + "\t" + time.ctime())
+                no_comment_f = open(self.path + "/fail_pr_comment/no_comment_number.txt", "a+", encoding="utf-8")
+                no_comment_f.write(str(pr_number) + "\n")
+                no_comment_f.close()
+                comment_file.write("No comment")
+                # 记录时间
+                comment_file.write("\n\n####################################################################\n")
+                submit_time, close_time, spent_time = self.get_time_of_fail(pr_page)
+                comment_file.write(
+                    "submit_time:{}\nclose_time:{}\nspent_time:{}".format(submit_time, close_time, spent_time))
+                comment_file.close()
+                continue
+
+            # 正常获取关闭评论
+            comment_file.write(close_comment)
+            # 记录时间
+            comment_file.write("\n\n####################################################################\n")
+            submit_time, close_time, spent_time = self.get_time_of_fail(pr_page)
+            comment_file.write("submit_time:{}\nclose_time:{}\nspent_time:{}".format(submit_time, close_time, spent_time))
+            comment_file.close()
+        fail_file.close()
+
+    def get_ok_pr_comment(self):
+        fail_file = open(self.path + "/ok_list.txt", "r", encoding="utf-8")
+        lines = fail_file.readlines()
+        for line in lines:
+            pr_number = line.strip()
+            # 重试3次获取页面内容
+            flag = False
+            for _ in range(3):
+                try:
+                    pr_page = get_html(self.project_url + "/pull/" + pr_number)
+                    pr_page_soup = BeautifulSoup(pr_page.text, "html5lib")
+                    flag = True
+                    break
+                except:
+                    continue
+            if not flag:
+                f = open(self.path + "/ok_pr_comment/" + "comment_fail.txt", "a+", encoding="utf-8")
+                f.write(line + "fail\n")
+                continue
+
+            # 把PR内容写入文件
+            comment_file = open(self.path + "/ok_pr_comment/" + pr_number + ".txt", "w", encoding="utf-8")
+            # 获取标题
+            pr_title = pr_page_soup.find("h1", attrs={"class": "gh-header-title"}).text.strip()
+            comment_file.write("tittle:" + pr_title)
+            comment_file.write("\n\n####################################################################\n")
+
+            # 获取发起人第一条评论内容
+            pr_content = pr_page_soup.find("div", attrs={"class": "edit-comment-hide"})
+            comment_file.write("content:{}".format(pr_content.text.strip()))
+            comment_file.write("\n\n####################################################################\n")
+
+            # 记录时间
+            submit_time, merge_time, spent_time = self.get_time_of_ok(pr_page)
+            comment_file.write("submit_time:{}\nclose_time:{}\nspent_time:{}".format(submit_time, merge_time, spent_time))
+            comment_file.write("\n\n####################################################################\n")
+
+            # 是否修改.md文件
+            def judge_md(pr_num):
+                pr_num = str(pr_num)
+                # 更改md文件的标记
+                flag1 = 0
+                # 获取commit详情页地址
+                commit_page_html = get_html(self.project_url + "/pull/" + pr_num + "/commits")
+                commit_page_soup = BeautifulSoup(commit_page_html.text, "html5lib")
+                commit_tag = commit_page_soup.find_all("a", attrs={"class": "sha btn btn-outline BtnGroup-item"})
+                if commit_tag is None:
+                    return 0
+
+                # commit详情页面分析
+                for i in commit_tag:
+                    commit_detail_url = "https://github.com" + i.attrs["href"]
+                    commit_detail_page = get_html(commit_detail_url)
+                    commit_detail_soup = BeautifulSoup(commit_detail_page.text, "html5lib")
+                    file_info_div = commit_detail_soup.find_all("div", attrs={"class": "file-info flex-auto"})
+                    for j in file_info_div:
+                        if ".md" in j.text:
+                            flag1 = 1
+                return flag1
+
+            comment_file.write("modify_md_file:"+str(judge_md(pr_number)))
+            comment_file.write("\n\n####################################################################\n")
+            comment_file.close()
+            print(pr_number + "获取成功" + "\t" + time.ctime())
+
+    def get_time_of_fail(self, pr_page_response):
+        pr_page_soup = BeautifulSoup(pr_page_response.text, "html5lib")
+        # 获取提交时间
+        submit_time_array = pr_page_soup.find("relative-time").attrs['datetime'].replace('T', '-').replace('Z', '') \
+            .replace(':', '-').split('-')
+        submit_time = datetime.datetime(int(submit_time_array[0]), int(submit_time_array[1]), int(submit_time_array[2]),
+                                        int(submit_time_array[3]), int(submit_time_array[4]), int(submit_time_array[5]))
+
+        # 获取关闭时间
+        close_time_array = \
+            pr_page_soup.find("svg", attrs={"class": "octicon octicon-circle-slash"}).parent.parent.find(
+                "relative-time") \
+                .attrs['datetime'].replace('T', '-').replace('Z', '').replace(':', '-').split('-')
+        close_time = datetime.datetime(int(close_time_array[0]), int(close_time_array[1]), int(close_time_array[2]),
+                                       int(close_time_array[3]), int(close_time_array[4]), int(close_time_array[5]))
+        spent_time = (close_time - submit_time)
+
+        return submit_time, close_time, spent_time
+
+    def get_time_of_ok(self, pr_page_response):
+        pr_page_soup = BeautifulSoup(pr_page_response.text, "html5lib")
+        # 获取合并的时间
+        merge_time_array = pr_page_soup.find("relative-time").attrs['datetime'].replace('T', '-').replace('Z', '') \
+            .replace(':', '-').split('-')
+        merge_time = datetime.datetime(int(merge_time_array[0]), int(merge_time_array[1]), int(merge_time_array[2]),
+                                       int(merge_time_array[3]), int(merge_time_array[4]), int(merge_time_array[5]))
+
+        # 获取提交时间
+        submit_time_array = pr_page_soup.find("a", attrs={"class": "link-gray js-timestamp"}).contents[0].attrs['datetime'].replace('T', '-').replace('Z', '').replace(':', '-').split('-')
+        submit_time = datetime.datetime(int(submit_time_array[0]), int(submit_time_array[1]), int(submit_time_array[2]),
+                                        int(submit_time_array[3]), int(submit_time_array[4]), int(submit_time_array[5]))
+        spent_time = (merge_time - submit_time)
+
+        return submit_time, merge_time, spent_time
 
 
 pr_get = PrGet()
-pr_get.get_pr_list(1, 10)
-pr_get.store_result()
+# pr_get.get_and_store_pr_list(1, 300)
+# pr_get.get_fail_pr_comment()
+pr_get.get_ok_pr_comment()

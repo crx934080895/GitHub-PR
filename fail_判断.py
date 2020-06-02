@@ -19,27 +19,6 @@ def get_html(url):
     return r
 
 
-# 获取PR通过耗时
-@retrying.retry(wait_fixed=2000)
-def get_time(pr_num):
-    pr_page_html = get_html(project_pull_url + str(pr_num))
-    pr_page_soup = BeautifulSoup(pr_page_html.text, "html5lib")
-    # 获取提交时间
-    submit_time_array = pr_page_soup.find("relative-time").attrs['datetime'].replace('T', '-').replace('Z', '')\
-        .replace(':', '-').split('-')
-    submit_time = datetime.datetime(int(submit_time_array[0]), int(submit_time_array[1]), int(submit_time_array[2]),
-                                    int(submit_time_array[3]), int(submit_time_array[4]), int(submit_time_array[5]))
-
-    # 获取关闭时间
-    close_time_array = pr_page_soup.find("svg", attrs={"class": "octicon octicon-circle-slash"}).parent.parent.find("relative-time")\
-        .attrs['datetime'].replace('T', '-').replace('Z', '').replace(':', '-').split('-')
-    close_time = datetime.datetime(int(close_time_array[0]), int(close_time_array[1]), int(close_time_array[2]),
-                                   int(close_time_array[3]), int(close_time_array[4]), int(close_time_array[5]))
-
-    spent_time = (close_time - submit_time)
-    return spent_time
-
-
 # 判断修改md文件,若修改了则返回1，反之返回0
 @retrying.retry(wait_fixed=2000)
 def judge_md(pr_num):
@@ -62,6 +41,7 @@ def judge_md(pr_num):
         for j in changed_file_name:
             if ".md" in j.text:
                 flag = 1
+
     if flag != 0:
         return 1
     else:
